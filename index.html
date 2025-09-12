@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Economic Calendar</title>
+  <style>
+    body {
+      font-family: "Segoe UI", Roboto, Arial, sans-serif;
+      background: #f5f7fa;
+      margin: 0;
+      padding: 20px;
+      color: #222;
+    }
+    h1 {
+      text-align: center;
+      margin-bottom: 20px;
+      font-size: 28px;
+      color: #1d3557;
+    }
+    .controls {
+      display: flex;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+    input, select, button {
+      padding: 8px 12px;
+      border-radius: 6px;
+      border: 1px solid #ccc;
+      font-size: 14px;
+    }
+    button {
+      background: #1d3557;
+      color: white;
+      cursor: pointer;
+      transition: 0.2s;
+    }
+    button:hover {
+      background: #457b9d;
+    }
+    .day-filters {
+      text-align: center;
+      margin-bottom: 20px;
+    }
+    .day-filters button {
+      margin: 0 5px;
+      padding: 6px 14px;
+      border: none;
+      border-radius: 6px;
+      background: #e9ecef;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    .day-filters button.active {
+      background: #1d3557;
+      color: white;
+      font-weight: bold;
+    }
+    #output {
+      display: grid;
+      gap: 16px;
+      max-width: 1000px;
+      margin: 0 auto;
+    }
+    .event {
+      background: #fff;
+      border-radius: 10px;
+      padding: 16px 20px;
+      box-shadow: 0 3px 8px rgba(0,0,0,0.08);
+      line-height: 1.5;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+    .event:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 6px 16px rgba(0,0,0,0.15);
+    }
+    .event.past {
+      background: #f1f1f1;
+      color: #777;
+    }
+    .event.upcoming {
+      border-left: 4px solid #1d3557;
+    }
+    .time {
+      font-size: 14px;
+      color: #555;
+      margin-bottom: 8px;
+    }
+    .event-title {
+      font-size: 16px;
+      font-weight: 600;
+      margin-bottom: 6px;
+      color: #1d3557;
+    }
+    .impact-high { color: #e63946; font-weight: bold; }
+    .impact-medium { color: #f4a261; font-weight: bold; }
+    .impact-low { color: #2a9d8f; font-weight: bold; }
+    .impact-none { color: #6c757d; font-weight: bold; }
+    .details {
+      font-size: 14px;
+      color: #444;
+    }
+  </style>
+</head>
+<body>
+  <h1>📅 Economic Calendar — This Week (IST)</h1>
+
+  <div class="controls">
+    <input type="text" id="search" placeholder="Search by event title...">
+    <select id="countryFilter">
+      <option value="">All Countries</option>
+    </select>
+    <select id="impactFilter">
+      <option value="">All Impacts</option>
+      <option value="High">High</option>
+      <option value="Medium">Medium</option>
+      <option value="Low">Low</option>
+    </select>
+    <button onclick="load()">🔄 Refresh</button>
+  </div>
+
+  <div class="day-filters">
+    <button onclick="setDayFilter('all')" class="active">All Week</button>
+    <button onclick="setDayFilter('yesterday')">Yesterday</button>
+    <button onclick="setDayFilter('today')">Today</button>
+    <button onclick="setDayFilter('tomorrow')">Tomorrow</button>
+  </div>
+
+  <div id="output">Loading…</div>
+
+<script>
+  // ✅ Use AllOrigins "get?url" instead of "raw"
+  const API_URL = 'https://api.allorigins.win/get?url=' + 
+                  encodeURIComponent('https://nfs.faireconomy.media/ff_calendar_thisweek.json');
+
+  let allEvents = [];
+  let currentDayFilter = "all";
+
+  function formatToIST(dateString) {
+    try {
+      const d = new Date(dateString);
+      return new Intl.DateTimeFormat("en-IN", {
+        weekday: "short", month: "short", day: "numeric",
+        hour: "2-digit", minute: "2-digit",
+        timeZone: "Asia/Kolkata"
+      }).format(d);
+    } catch {
+      return dateString;
+    }
+  }
+
+  function normalizeImpact(raw) {
+    if (!raw) return { label: "None", cls: "impact-none" };
+    const str = String(raw).toLowerCase();
+    if (str.includes("high") || str === "3") return { label: "High", cls: "impact-high" };
+    if (str.includes("medium") || str.includes("med") || str === "2") return { label: "Medium", cls: "impact-medium" };
+    if (str.includes("low") || str === "1") return { label: "Low", cls: "impact-low" };
+    return { label: raw, cls: "impact-none" };
+  }
+
+  function render(events) {
+    const out = document.getElementById("output");
+    out.innerHTML = "";
+
+    if (!events.length) {
+      out.textContent = "No events match your filters.";
+      return;
+    }
+
+    const now = new Date();
+
+    // Find the earliest upcoming timestamp
+    const futureEvents = events.filter(ev => ev.date && new Date(ev.date) > now);
+    let nextUpcomingTime = null;
+    if (futureEvents.length) {
+      nextUpcomingTime = new Date(
+        Math.min(...futureEvents.map(ev => new Date(ev.date)))
+      ).getTime();
+    }
+
+    events.forEach(ev => {
+      const div = document.createElement("div");
+      div.className = "event";
+
+      const eventTime = ev.date ? new Date(ev.date).getTime() : null;
+
+      if (eventTime && eventTime < now.getTime()) {
+        div.classList.add("past");       // Past event
+      } else if (eventTime && nextUpcomingTime && eventTime === nextUpcomingTime) {
+        div.classList.add("upcoming");   // All events at same next time
+      }
+
+      const timeStr = ev.date ? formatToIST(ev.date) : "Time N/A";
+      const title = ev.title ?? ev.event ?? "Untitled";
+      const country = ev.country ?? ev.ccy ?? "—";
+      const { label: impactLabel, cls: impactCls } = normalizeImpact(ev.impact ?? ev.importance);
+
+      const actual = ev.actual ?? "—";
+      const forecast = ev.forecast ?? "—";
+      const previous = ev.previous ?? "—";
+
+      div.innerHTML = `
+        <div class="time">${timeStr} — <strong>${country}</strong></div>
+        <div class="event-title">${title}</div>
+        <div>Impact: <span class="${impactCls}">${impactLabel}</span></div>
+        <div class="details">Actual: <strong>${actual}</strong> | Forecast: <strong>${forecast}</strong> | Previous: <strong>${previous}</strong></div>
+      `;
+
+      out.appendChild(div);
+    });
+  }
+
+  function applyFilters() {
+    const search = document.getElementById("search").value.toLowerCase();
+    const country = document.getElementById("countryFilter").value;
+    const impact = document.getElementById("impactFilter").value;
+
+    let filtered = allEvents;
+
+    // Day filter
+    const today = new Date();
+    today.setHours(0,0,0,0);
+
+    const tz = "Asia/Kolkata";
+    const formatter = new Intl.DateTimeFormat("en-CA", { timeZone: tz, year:"numeric", month:"2-digit", day:"2-digit" });
+
+    const todayStr = formatter.format(today);
+    const yesterday = new Date(today); yesterday.setDate(today.getDate()-1);
+    const yesterdayStr = formatter.format(yesterday);
+    const tomorrow = new Date(today); tomorrow.setDate(today.getDate()+1);
+    const tomorrowStr = formatter.format(tomorrow);
+
+    if (currentDayFilter !== "all") {
+      filtered = filtered.filter(ev => {
+        if (!ev.date) return false;
+        const d = new Date(ev.date);
+        const dStr = formatter.format(d);
+        if (currentDayFilter === "today") return dStr === todayStr;
+        if (currentDayFilter === "yesterday") return dStr === yesterdayStr;
+        if (currentDayFilter === "tomorrow") return dStr === tomorrowStr;
+      });
+    }
+
+    // Search + country + impact
+    filtered = filtered.filter(ev => {
+      const title = (ev.title ?? ev.event ?? "").toLowerCase();
+      const countryMatch = !country || ev.country === country || ev.ccy === country;
+      const { label: impactLabel } = normalizeImpact(ev.impact ?? ev.importance);
+      const impactMatch = !impact || impactLabel === impact;
+      return title.includes(search) && countryMatch && impactMatch;
+    });
+
+    render(filtered);
+  }
+
+  function setDayFilter(day) {
+    currentDayFilter = day;
+    document.querySelectorAll(".day-filters button").forEach(btn => btn.classList.remove("active"));
+    document.querySelector(`.day-filters button[onclick="setDayFilter('${day}')"]`).classList.add("active");
+    applyFilters();
+  }
+
+  async function load() {
+    try {
+      const res = await fetch(API_URL);
+      const wrapper = await res.json();  // wrapper from AllOrigins
+      allEvents = JSON.parse(wrapper.contents); // actual calendar JSON
+
+      // Fill country filter dynamically
+      const countries = [...new Set(allEvents.map(ev => ev.country ?? ev.ccy).filter(Boolean))];
+      const countrySelect = document.getElementById("countryFilter");
+      countrySelect.innerHTML = '<option value="">All Countries</option>' +
+        countries.map(c => `<option value="${c}">${c}</option>`).join("");
+
+      applyFilters();
+
+    } catch (err) {
+      document.getElementById("output").textContent = "Error: " + err.message;
+    }
+  }
+
+  document.getElementById("search").addEventListener("input", applyFilters);
+  document.getElementById("countryFilter").addEventListener("change", applyFilters);
+  document.getElementById("impactFilter").addEventListener("change", applyFilters);
+
+  load();
+</script>
+</body>
+</html>
